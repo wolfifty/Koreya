@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Админка — Корейский бот</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root{
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --text: var(--tg-theme-text-color, #1c1c1e);
+    --hint: var(--tg-theme-hint-color, #8e8e93);
+    --link: var(--tg-theme-link-color, #8b5cf6);
+    --btn: var(--tg-theme-button-color, #8b5cf6);
+    --btn-text: var(--tg-theme-button-text-color, #ffffff);
+    --secondary-bg: var(--tg-theme-secondary-bg-color, #f4f3f7);
+    --border: #e5e3ee;
+  }
+  * { box-sizing: border-box; }
+  body{
+    margin:0; padding:16px; padding-bottom:32px;
+    background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    font-size:15px;
+  }
+  #loading, #denied{ text-align:center; padding:48px 16px; color:var(--hint); }
+  .tabs{ display:flex; gap:8px; margin-bottom:16px; }
+  .tab{
+    flex:1; padding:10px 8px; border:none; border-radius:10px;
+    background:var(--secondary-bg); color:var(--text); font-size:14px; font-weight:600;
+    cursor:pointer;
+  }
+  .tab.active{ background:var(--btn); color:var(--btn-text); }
+  .tab-content[hidden]{ display:none; }
+
+  h2{ font-size:16px; margin:0 0 12px; }
+  .muted{ color:var(--hint); font-size:13px; }
+
+  table{ width:100%; border-collapse:collapse; font-size:13px; }
+  th, td{ text-align:left; padding:8px 6px; border-bottom:1px solid var(--border); vertical-align:top; }
+  th{ color:var(--hint); font-weight:600; font-size:12px; }
+
+  label{ display:block; font-size:13px; font-weight:600; margin:14px 0 6px; }
+  textarea, input[type=text], input[type=url], select{
+    width:100%; padding:10px; border-radius:10px; border:1px solid var(--border);
+    background:var(--secondary-bg); color:var(--text); font-size:14px; font-family:inherit;
+  }
+  textarea{ min-height:110px; resize:vertical; }
+  .row{ display:flex; gap:8px; }
+  .row > *{ flex:1; }
+
+  .radio-group{ display:flex; flex-direction:column; gap:6px; margin-top:6px; }
+  .radio-group label{ display:flex; align-items:center; gap:8px; font-weight:400; margin:0; }
+  .radio-group input{ width:auto; }
+
+  .checkbox-list{ max-height:220px; overflow-y:auto; border:1px solid var(--border); border-radius:10px; padding:8px; margin-top:8px; }
+  .checkbox-list label{ display:flex; align-items:center; gap:8px; font-weight:400; padding:4px 0; margin:0; }
+  .checkbox-list input{ width:auto; }
+
+  button.primary{
+    width:100%; margin-top:18px; padding:13px; border:none; border-radius:12px;
+    background:var(--btn); color:var(--btn-text); font-size:15px; font-weight:700; cursor:pointer;
+  }
+  button.primary:disabled{ opacity:0.5; }
+
+  .result{ margin-top:14px; padding:12px; border-radius:10px; background:var(--secondary-bg); font-size:13px; }
+  .file-preview{ margin-top:8px; max-width:100%; border-radius:10px; display:none; }
+
+  .modal-backdrop{
+    position:fixed; inset:0; background:rgba(0,0,0,0.45); display:flex; align-items:flex-end;
+    justify-content:center; z-index:10;
+  }
+  .modal{
+    background:var(--bg); width:100%; max-width:480px; border-radius:16px 16px 0 0; padding:20px;
+  }
+  .modal p{ font-size:14px; }
+  .modal-actions{ display:flex; gap:10px; margin-top:16px; }
+  .modal-actions button{ flex:1; padding:12px; border-radius:10px; border:none; font-weight:700; cursor:pointer; }
+  .btn-cancel{ background:var(--secondary-bg); color:var(--text); }
+  .btn-confirm{ background:var(--btn); color:var(--btn-text); }
+</style>
+</head>
+<body>
+
+<div id="loading">Проверяем доступ…</div>
+<div id="denied" hidden>Доступ запрещён. Открой этот раздел из аккаунта администратора.</div>
+
+<div id="main" hidden>
+  <div class="tabs">
+    <button class="tab active" data-tab="clients">Клиенты</button>
+    <button class="tab" data-tab="broadcast">Рассылка</button>
+  </div>
+
+  <div id="tab-clients" class="tab-content">
+    <h2>Клиенты <span class="muted" id="clients-count"></span></h2>
+    <div id="clients-table-wrap">
+      <table>
+        <thead>
+          <tr><th>Ник</th><th>Ветка</th><th>Дата</th></tr>
+        </thead>
+        <tbody id="clients-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="tab-broadcast" class="tab-content" hidden>
+    <h2>Рассылка</h2>
+
+    <label for="bc-photo">Фото (необязательно)</label>
+    <input type="file" id="bc-photo" accept="image/*" />
+    <img id="bc-photo-preview" class="file-preview" />
+
+    <label for="bc-text">Текст</label>
+    <textarea id="bc-text" placeholder="*Жирный* и _курсив_ поддерживаются"></textarea>
+
+    <div class="row">
+      <div>
+        <label for="bc-btn-text">Текст кнопки</label>
+        <input type="text" id="bc-btn-text" placeholder="Например: Написать" />
+      </div>
+      <div>
+        <label for="bc-btn-url">Ссылка кнопки</label>
+        <input type="url" id="bc-btn-url" placeholder="https://t.me/..." />
+      </div>
+    </div>
+
+    <label>Кому отправить</label>
+    <div class="radio-group">
+      <label><input type="radio" name="target" value="all" checked /> Всем клиентам</label>
+      <label><input type="radio" name="target" value="branch" /> По ветке</label>
+      <label><input type="radio" name="target" value="selected" /> Выбранным вручную</label>
+    </div>
+
+    <div id="branch-picker" hidden>
+      <select id="bc-branch">
+        <option value="Поступление">Поступление</option>
+        <option value="Для себя — с нуля">Для себя — с нуля</option>
+        <option value="Для себя — знает алфавит">Для себя — знает алфавит</option>
+        <option value="Для себя">Для себя (не дошли до второго вопроса)</option>
+      </select>
+    </div>
+
+    <div id="selected-picker" hidden class="checkbox-list"></div>
+
+    <button class="primary" id="bc-submit">Отправить</button>
+    <div id="bc-result" class="result" hidden></div>
+  </div>
+</div>
+
+<script>
+  const tg = window.Telegram?.WebApp;
+  tg?.ready();
+  tg?.expand();
+
+  const initData = tg?.initData || '';
+
+  async function api(path, body) {
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData, ...body }),
+    });
+    return res.json();
+  }
+
+  let allUsers = [];
+
+  function renderClients() {
+    document.getElementById('clients-count').textContent = `(${allUsers.length})`;
+    const tbody = document.getElementById('clients-tbody');
+    tbody.innerHTML = allUsers.map(u => `
+      <tr>
+        <td>${u.username ? '@' + escapeHtml(u.username) : (u.first_name ? escapeHtml(u.first_name) : u.chat_id)}</td>
+        <td>${escapeHtml(u.branch || '—')}</td>
+        <td>${formatDate(u.created_at)}</td>
+      </tr>
+    `).join('');
+  }
+
+  function renderSelectedPicker() {
+    const wrap = document.getElementById('selected-picker');
+    wrap.innerHTML = allUsers.map(u => `
+      <label>
+        <input type="checkbox" class="sel-user" value="${u.chat_id}" />
+        ${u.username ? '@' + escapeHtml(u.username) : (u.first_name ? escapeHtml(u.first_name) : u.chat_id)}
+        <span class="muted">— ${escapeHtml(u.branch || '—')}</span>
+      </label>
+    `).join('');
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+  function formatDate(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return d.toLocaleDateString('ru-RU') + ' ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  async function init() {
+    const check = await api('/api/admin/check', {});
+    if (!check.ok) {
+      document.getElementById('loading').hidden = true;
+      document.getElementById('denied').hidden = false;
+      return;
+    }
+    const usersRes = await api('/api/admin/users', {});
+    allUsers = usersRes.users || [];
+    renderClients();
+    renderSelectedPicker();
+
+    document.getElementById('loading').hidden = true;
+    document.getElementById('main').hidden = false;
+  }
+
+  // Tabs
+  document.querySelectorAll('.tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.querySelectorAll('.tab-content').forEach(c => c.hidden = true);
+      document.getElementById('tab-' + btn.dataset.tab).hidden = false;
+    });
+  });
+
+  // Target radio -> show/hide pickers
+  document.querySelectorAll('input[name=target]').forEach(r => {
+    r.addEventListener('change', () => {
+      const v = document.querySelector('input[name=target]:checked').value;
+      document.getElementById('branch-picker').hidden = v !== 'branch';
+      document.getElementById('selected-picker').hidden = v !== 'selected';
+    });
+  });
+
+  // Photo preview
+  let photoBase64 = null;
+  document.getElementById('bc-photo').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) { photoBase64 = null; return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result; // data:image/...;base64,XXXX
+      photoBase64 = result.split(',')[1];
+      const preview = document.getElementById('bc-photo-preview');
+      preview.src = result;
+      preview.style.display = 'block';
+    };
+    reader.readAsDataURL(file);
+  });
+
+  function currentRecipientsCount() {
+    const target = document.querySelector('input[name=target]:checked').value;
+    if (target === 'all') return allUsers.length;
+    if (target === 'branch') {
+      const branch = document.getElementById('bc-branch').value;
+      return allUsers.filter(u => u.branch === branch).length;
+    }
+    return document.querySelectorAll('.sel-user:checked').length;
+  }
+
+  document.getElementById('bc-submit').addEventListener('click', () => {
+    const text = document.getElementById('bc-text').value.trim();
+    if (!text && !photoBase64) {
+      tg?.showAlert ? tg.showAlert('Добавь текст или фото') : alert('Добавь текст или фото');
+      return;
+    }
+    const count = currentRecipientsCount();
+    showConfirm(count, doSend);
+  });
+
+  function showConfirm(count, onConfirm) {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop';
+    backdrop.innerHTML = `
+      <div class="modal">
+        <p>Отправить рассылку <b>${count}</b> получател${plural(count)}?</p>
+        <div class="modal-actions">
+          <button class="btn-cancel">Отмена</button>
+          <button class="btn-confirm">Отправить</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(backdrop);
+    backdrop.querySelector('.btn-cancel').onclick = () => backdrop.remove();
+    backdrop.querySelector('.btn-confirm').onclick = () => { backdrop.remove(); onConfirm(); };
+  }
+  function plural(n) {
+    const mod10 = n % 10, mod100 = n % 100;
+    if (mod10 === 1 && mod100 !== 11) return 'ю';
+    return 'ям';
+  }
+
+  async function doSend() {
+    const btn = document.getElementById('bc-submit');
+    btn.disabled = true;
+    btn.textContent = 'Отправляем…';
+
+    const target = document.querySelector('input[name=target]:checked').value;
+    const body = {
+      text: document.getElementById('bc-text').value.trim() || undefined,
+      photoBase64: photoBase64 || undefined,
+      buttonText: document.getElementById('bc-btn-text').value.trim() || undefined,
+      buttonUrl: document.getElementById('bc-btn-url').value.trim() || undefined,
+      target,
+      branch: target === 'branch' ? document.getElementById('bc-branch').value : undefined,
+      chatIds: target === 'selected'
+        ? Array.from(document.querySelectorAll('.sel-user:checked')).map(el => Number(el.value))
+        : undefined,
+    };
+
+    const result = await api('/api/admin/broadcast', body);
+
+    btn.disabled = false;
+    btn.textContent = 'Отправить';
+
+    const box = document.getElementById('bc-result');
+    box.hidden = false;
+    if (result.error) {
+      box.textContent = 'Ошибка: ' + result.error;
+    } else {
+      box.textContent = `Готово. Отправлено: ${result.sent}, ошибок: ${result.failed}, всего получателей: ${result.total}.`;
+    }
+  }
+
+  init();
+</script>
+</body>
+</html>
