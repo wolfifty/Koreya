@@ -1,4 +1,4 @@
-import { validateInitData, isAdmin, tg } from '../_lib/telegram.js';
+import { validateInitData, isAdmin, toTelegramHTML, sendBroadcast } from '../_lib/telegram.js';
 import { listChatIds } from '../_lib/supabase.js';
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -47,13 +47,23 @@ export default async function handler(req, res) {
     const buffer = Buffer.from(photoBase64, 'base64');
     const form = new FormData();
     form.append('chat_id', String(admin.id));
-    if (text) form.append('caption', text);
-    form.append('parse_mode', 'Markdown');
+    if (text) form.append('caption', toTelegramHTML(text));
+    form.append('parse_mode', 'HTML');
     form.append('photo', new Blob([buffer]), 'broadcast.jpg');
     if (reply_markup) form.append('reply_markup', JSON.stringify(reply_markup));
 
-    const uploadRes = await fetch(`https://api.telegram.org/bot${TOKEN}/sendPhoto`, { method: 'POST', body: form });
-    const uploadData = await uploadRes.json();
+    let uploadRes = await fetch(`https://api.telegram.org/bot${TOKEN}/sendPhoto`, { method: 'POST', body: form });
+    let uploadData = await uploadRes.json();
+    if (!uploadData.ok) {
+      // Подстраховка на случай сбоя разметки — пробуем без форматирования
+      const plainForm = new FormData();
+      plainForm.append('chat_id', String(admin.id));
+      if (text) plainForm.append('caption', text);
+      plainForm.append('photo', new Blob([buffer]), 'broadcast.jpg');
+      if (reply_markup) plainForm.append('reply_markup', JSON.stringify(reply_markup));
+      uploadRes = await fetch(`https://api.telegram.org/bot${TOKEN}/sendPhoto`, { method: 'POST', body: plainForm });
+      uploadData = await uploadRes.json();
+    }
     if (!uploadData.ok) {
       res.status(500).json({ error: 'photo_upload_failed', details: uploadData });
       return;
@@ -71,9 +81,7 @@ export default async function handler(req, res) {
       continue;
     }
     try {
-      const result = fileId
-        ? await tg('sendPhoto', { chat_id: chatId, photo: fileId, caption: text || undefined, parse_mode: 'Markdown', reply_markup })
-        : await tg('sendMessage', { chat_id: chatId, text, parse_mode: 'Markdown', reply_markup });
+      const result = await sendBroadcast(chatId, { text, fileId, reply_markup });
       if (result.ok) sent++; else failed++;
     } catch (e) {
       failed++;

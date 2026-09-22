@@ -18,13 +18,31 @@ export async function tg(method, params = {}) {
   return data;
 }
 
+// Наши тексты пишутся в простом стиле *жирный* / _курсив_, но реальная отправка идёт
+// через parse_mode=HTML — он не ломается ни от каких символов (дефисы, скобки, подчёркивания
+// в ссылках и т.д.), в отличие от Markdown-режима Telegram, где один незакрытый _ или *
+// приводит к отказу отправить ВСЁ сообщение целиком.
+export function toTelegramHTML(text) {
+  if (!text) return text;
+  let out = String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  out = out.replace(/\*([^*]+)\*/g, '<b>$1</b>');
+  out = out.replace(/_([^_]+)_/g, '<i>$1</i>');
+  return out;
+}
+
 export async function sendMessage(chatId, text, extra = {}) {
-  return tg('sendMessage', {
-    chat_id: chatId,
-    text,
-    parse_mode: 'Markdown',
-    ...extra,
-  });
+  const params = { chat_id: chatId, text: toTelegramHTML(text), parse_mode: 'HTML', ...extra };
+  let result = await tg('sendMessage', params);
+  if (!result.ok) {
+    // Подстраховка: если по какой-то причине разметка всё же не разобралась —
+    // отправляем тот же текст без форматирования, лишь бы сообщение дошло.
+    console.warn(`sendMessage: retry as plain text after error: ${result.description}`);
+    result = await tg('sendMessage', { ...params, text, parse_mode: undefined });
+  }
+  return result;
 }
 
 export async function answerCallbackQuery(id, extra = {}) {
@@ -48,6 +66,24 @@ export async function sendPhotoAlbum(chatId, filePaths) {
     console.error('Telegram API error [sendMediaGroup]:', JSON.stringify(data));
   }
   return data;
+}
+
+// Отправка одного сообщения рассылки (текст или фото по file_id) с той же страховкой на случай сбоя разметки
+export async function sendBroadcast(chatId, { text, fileId, reply_markup } = {}) {
+  const html = text ? toTelegramHTML(text) : undefined;
+  const method = fileId ? 'sendPhoto' : 'sendMessage';
+  const base = fileId
+    ? { chat_id: chatId, photo: fileId, caption: html, parse_mode: 'HTML', reply_markup }
+    : { chat_id: chatId, text: html, parse_mode: 'HTML', reply_markup };
+
+  let result = await tg(method, base);
+  if (!result.ok) {
+    const plain = fileId
+      ? { chat_id: chatId, photo: fileId, caption: text, reply_markup }
+      : { chat_id: chatId, text, reply_markup };
+    result = await tg(method, plain);
+  }
+  return result;
 }
 
 export function inlineKeyboard(rows) {
